@@ -1,0 +1,5 @@
+# Ignore Python virtual environment
+.venv/
+
+# Ignore all files under data folder
+data/
