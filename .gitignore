@@ -5,3 +5,5 @@
 data/
 __pycache__/
 mne_report.html/
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
