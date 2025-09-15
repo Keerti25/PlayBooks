@@ -78,6 +78,8 @@ def extract_events(df=None,raw=None):
                 print(f"Found events: {event_ids}")
             except:
                 print("No events found!")
+    else:
+        raise ValueError("Either df or raw must be provided")
     
     return events,event_ids, stimulus_counts
 
@@ -92,6 +94,7 @@ def create_epochs(raw, events,Config):
         tmax=Config.EPOCH_TMAX,
         baseline=Config.BASELINE, 
         preload=True, 
+        picks='all'
         # reject={'eeg':0.0001}  # We'll do manual artifact rejection
     )
     
@@ -141,6 +144,28 @@ def compute_sme_erplab(epoch_list, time_window):
         }
     
     return sme_results
+
+def moving_window_step_artifact_detection(epochs, channel_name="VEOG-lower",window_size=0.2, step_size=0.01, threshold=100):
+    sfreq = epochs.info['sfreq']
+    win_samp = int(window_size * sfreq)
+    step_samp = int(step_size * sfreq)
+
+    # Pick an EOG channel (e.g., VEOG-lower)
+    eog_data = epochs.copy().pick([channel_name]).get_data() * 1e6  # µV
+    n_epochs = eog_data.shape[0]
+    bad_epochs = [None] * n_epochs
+
+    for i, epoch in enumerate(eog_data):
+        max_diff = 0
+        for start in range(0, epoch.shape[1] - win_samp, step_samp):
+            half = win_samp // 2
+            mean1 = epoch[0, start:start+half].mean()
+            mean2 = epoch[0, start+half:start+win_samp].mean()
+            diff = abs(mean2 - mean1)
+            max_diff = max(max_diff, diff)
+        if max_diff > threshold:
+            bad_epochs[i] = i 
+    return bad_epochs
 
 def plot_bad_epochs(epochs_interpolated,bad_epochs,channel_name,n_epochs_to_plot,title="Blink Artifact Detection"):
     epoch_colors = []
