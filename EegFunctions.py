@@ -6,6 +6,7 @@ from scipy import signal
 from scipy.signal import welch
 from autoreject import AutoReject
 from mne.viz import plot_epochs as plot_mne_epochs
+from scipy.io import loadmat
 
 # from scipy.stats import zscore
 import os
@@ -32,13 +33,46 @@ def create_mne_raw(path, unit_conversion=1e-6,sampling_rate=250):
         # Create Raw object
         raw = mne.io.RawArray(eeg_data, info)
     elif extension in ('set','fdt'):
-        raw = mne.io.read_raw_eeglab(path, preload=True)
+        if _is_epoched_set_file(path):
+            print("Detected epoched data - using mne.io.read_epochs_eeglab()")
+            epochs = mne.io.read_epochs_eeglab(path, verbose=False)
+            return epochs,df
+        else:
+            raw = mne.io.read_raw_eeglab(path, preload=True)
     try:
         montage = mne.channels.make_standard_montage('standard_1020')
         raw.set_montage(montage, on_missing='ignore')
     except:
         print("Warning: Could not set electrode positions")
     return raw,df
+
+def _is_epoched_set_file(path):
+    
+    try:
+       
+        set_data = loadmat(path, struct_as_record=False, squeeze_me=True)
+        if 'EEG' in set_data:
+            eeg = set_data['EEG']
+        else:
+            eeg = set_data
+            
+        # Check if trials field exists and is greater than 1
+        if hasattr(eeg, 'trials'):
+            trials = eeg.trials
+            print(f"Number of trials detected: {trials}")
+            return trials > 1
+        elif 'trials' in eeg:
+            trials = eeg['trials']
+            print(f"Number of trials detected: {trials}")
+            return trials > 1
+        else:
+            print("No trials field found - assuming continuous data")
+            return False
+            
+    except Exception as e:
+        print(f"Error reading .set file structure: {e}")
+        print("Defaulting to continuous data reader")
+        return False
 
 def extract_events(df=None,raw=None):
     """Extract stimulus events from DataFrame"""
@@ -107,23 +141,33 @@ def create_epochs(raw, events,Config):
     print(f"Created epochs - {', '.join(event_counts)}")
     return epochs
 
-def create_bins(events):
+def create_bins(events,event_codes=None):
     """Create bins based on stimulus sequence"""
-    bin_1_indices = []  # Deviant preceded by standard
-    bin_2_indices = []  # Standard preceded by standard
-    
-    for i, event in enumerate(events[1:], 1):  # Skip first event
-        current_event = event[2]
-        previous_event = events[i-1][2]
+    bin_1_indices = [] 
+    bin_2_indices = []
+    if event_codes is None:
         
-        # Bin 1: Current is deviant (70), previous is standard (80)
-        if current_event == 3 and previous_event == 4:
-            bin_1_indices.append(i-1)  # Adjust for epoch indexing
+        for i, event in enumerate(events[1:], 1):  # Skip first event
+            current_event = event[2]
+            previous_event = events[i-1][2]
             
-        # Bin 2: Current is standard (80), previous is standard (80)
-        elif current_event == 4 and previous_event == 4:
-            bin_2_indices.append(i-1)  # Adjust for epoch indexing
-    
+            # Bin 1: Current is deviant (70), previous is standard (80)
+            if current_event == 3 and previous_event == 4:
+                bin_1_indices.append(i-1)  # Adjust for epoch indexing
+                
+            # Bin 2: Current is standard (80), previous is standard (80)
+            elif current_event == 4 and previous_event == 4:
+                bin_2_indices.append(i-1)  # Adjust for epoch indexing
+    else:
+        print("Using provided bin indices")
+        condition_1 = event_codes.get('condition_1', [])
+        condition_2 = event_codes.get('condition_2', [])
+        for i, event in enumerate(events):
+            if event[2] in condition_1:
+                bin_1_indices.append(i)
+            elif event[2] in condition_2:
+                bin_2_indices.append(i)
+        
     return bin_1_indices, bin_2_indices
 
 def compute_sme_erplab(epoch_list, time_window):
@@ -145,19 +189,31 @@ def compute_sme_erplab(epoch_list, time_window):
     
     return sme_results
 
-def moving_window_step_artifact_detection(epochs, channel_name="VEOG-lower",window_size=0.2, step_size=0.01, threshold=100):
+def moving_window_step_artifact_detection(epochs, channel_name="VEOG-lower",window_size=0.2,
+                                           step_size=0.01, threshold=100,
+                                           tmin=None, tmax=None ):
     sfreq = epochs.info['sfreq']
     win_samp = int(window_size * sfreq)
     step_samp = int(step_size * sfreq)
 
     # Pick an EOG channel (e.g., VEOG-lower)
     eog_data = epochs.copy().pick([channel_name]).get_data() * 1e6  # µV
+
+    if tmin is not None and tmax is not None:
+        times = epochs.times  # relative time in seconds
+        
+        # Indices for test period
+        mask = (times >= tmin) & (times <= tmax)
+        test_indices = np.where(mask)[0]
+    else:
+        test_indices [0,epochs[0].shape[1]]
+
     n_epochs = eog_data.shape[0]
     bad_epochs = [None] * n_epochs
 
     for i, epoch in enumerate(eog_data):
         max_diff = 0
-        for start in range(0, epoch.shape[1] - win_samp, step_samp):
+        for start in range(test_indices[0], test_indices[-1] - win_samp, step_samp):
             half = win_samp // 2
             mean1 = epoch[0, start:start+half].mean()
             mean2 = epoch[0, start+half:start+win_samp].mean()
