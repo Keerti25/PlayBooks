@@ -4,6 +4,8 @@
 # Ignore all files under data folder
 data/
 __pycache__/
+acw_play/
+play_test.ipynb
 mne_report.html
 # Ignore Jupyter Notebook checkpoints
 .ipynb_checkpoints/

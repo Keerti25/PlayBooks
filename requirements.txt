@@ -7,3 +7,7 @@ plotly==6.3.0
 PyQt6==6.9.1
 seaborn==0.13.2
 eeglabio==0.1.0
+torch==2.8.0
+pywhatkit==5.4
+PyAutoGUI==0.9.54
+mne-lsl==1.11.0

@@ -12,7 +12,7 @@ from scipy.io import loadmat
 import os
 import seaborn as sns
 
-def create_mne_raw(path, unit_conversion=1e-6,sampling_rate=250):
+def create_mne_raw(path, unit_conversion=1e6,sampling_rate=250):
     """Convert DataFrame to MNE Raw object"""
     print("=== CREATING MNE OBJECT ===")
     
@@ -21,8 +21,9 @@ def create_mne_raw(path, unit_conversion=1e-6,sampling_rate=250):
     if extension =='csv':
         df = pd.read_csv(path)
         CHANNELS = df.columns[1:-1].to_list()
-        eeg_data = df[CHANNELS].values.T * unit_conversion 
-        print(CHANNELS)
+        eeg_data = (df[CHANNELS].values.T)/unit_conversion
+        # eeg_data[:-1] /= unit_conversion
+        print(CHANNELS,unit_conversion)
             # Create MNE info object
         info = mne.create_info(
             ch_names=CHANNELS, 
@@ -81,11 +82,19 @@ def extract_events(df=None,raw=None):
         # Find stimulus events
         
         events_from_stim = (df['stim'] != 0.0).values
-        event_samples = np.where(events_from_stim)[0]
-        event_ids = df['stim'][events_from_stim].values.astype(int)
+       
+        if not np.any(events_from_stim):
+            event_samples = np.arange(len(df))             # keep all indices
+            event_ids = df['stim'].values.astype(int)   
+        else:
+            event_samples = np.where(events_from_stim)[0]
+            
+            event_ids = df['stim'][events_from_stim].values.astype(int)
+        
         events = np.vstack([event_samples, np.zeros_like(event_samples), event_ids]).T
         
         print(f"Found {len(events)} total events")
+        # event_ids = np.unique(event_ids)
         print(f"Event types: {np.unique(event_ids)}")
         
         # Count events by type
@@ -129,7 +138,7 @@ def create_epochs(raw, events,Config):
         baseline=Config.BASELINE, 
         preload=True, 
         picks='all'
-        # reject={'eeg':0.0001}  # We'll do manual artifact rejection
+        # reject={'eeg':0.0001}  
     )
     
     # Print counts for all event types dynamically
@@ -206,7 +215,7 @@ def moving_window_step_artifact_detection(epochs, channel_name="VEOG-lower",wind
         mask = (times >= tmin) & (times <= tmax)
         test_indices = np.where(mask)[0]
     else:
-        test_indices [0,epochs[0].shape[1]]
+        test_indices =[0,eog_data[0].shape[1]]
 
     n_epochs = eog_data.shape[0]
     bad_epochs = [None] * n_epochs
@@ -235,7 +244,7 @@ def plot_bad_epochs(epochs_interpolated,bad_epochs,channel_name,n_epochs_to_plot
             
     plot_mne_epochs(
         epochs=epochs_interpolated,
-        picks='eog',
+        # picks='eog',
         epoch_colors=epoch_colors,
         scalings={  'eeg': 100e-6, 'eog': 100e-6},
         title=title,
